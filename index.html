@@ -6,10 +6,9 @@
 <title>비밀번호 안전성 검사기</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
 
-<!-- ✅ Firebase 연동: 아래 두 줄 주석 해제 후 firebase-config.js에 본인 설정 입력 -->
-!-- <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script> --
-!-- <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script> --
-!-- <script src="firebase-config.js"></script> --
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="firebase-config.js"></script>
 
 <style>
 :root {
@@ -205,7 +204,6 @@ html, body { background: var(--bg); color: var(--text); font-family: var(--font)
         <div class="stats-title">사용 통계</div>
         <div class="stats-sub" id="lastUpdate">로딩 중...</div>
       </div>
-      <button class="reset-btn" onclick="resetStats()"><i class="ti ti-refresh"></i> 초기화</button>
     </div>
 
     <div class="db-badge" id="dbBadge">
