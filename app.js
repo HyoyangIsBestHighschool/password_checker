@@ -90,28 +90,23 @@ async function doAnalyze() {
   const pw = document.getElementById('pwFirst').value;
   if (!pw) return;
 
-  // 세션 기록 (최초 1회)
-  if (!sessionRecorded) {
-    sessionRecorded = true;
-    await statsIncrement({ sessions: 1 });
-  }
-
   firstResult = analyze(pw);
 
-  // 통계 저장
+  // 통계 저장 — 읽기/쓰기를 한 번에 처리해 race condition 방지
   const di = firstResult.score < 25 ? 0 : firstResult.score < 50 ? 1 :
              firstResult.score < 75 ? 2 : firstResult.score < 90 ? 3 : 4;
-  const critInc = { totalChecks: 1, criteriaCnt: 1 };
-  if (firstResult.len >= 8)    critInc['criteria.len8'] = 1;
-  if (firstResult.len >= 15)   critInc['criteria.len15'] = 1;
-  if (firstResult.hasUpper)    critInc['criteria.upper'] = 1;
-  if (firstResult.hasLower)    critInc['criteria.lower'] = 1;
-  if (firstResult.hasDigit)    critInc['criteria.digit'] = 1;
-  if (firstResult.hasSpecial)  critInc['criteria.special'] = 1;
-  if (!firstResult.isCommon)   critInc['criteria.common'] = 1;
-  if (!firstResult.hasSeq)     critInc['criteria.seq'] = 1;
-  await statsIncrement(critInc);
-  await statsIncrementDist(di);
+  const sessionFields = !sessionRecorded ? { sessions: 1 } : {};
+  if (!sessionRecorded) sessionRecorded = true;
+  const fields = { ...sessionFields, totalChecks: 1, criteriaCnt: 1 };
+  if (firstResult.len >= 8)   fields['criteria.len8']    = 1;
+  if (firstResult.len >= 15)  fields['criteria.len15']   = 1;
+  if (firstResult.hasUpper)   fields['criteria.upper']   = 1;
+  if (firstResult.hasLower)   fields['criteria.lower']   = 1;
+  if (firstResult.hasDigit)   fields['criteria.digit']   = 1;
+  if (firstResult.hasSpecial) fields['criteria.special'] = 1;
+  if (!firstResult.isCommon)  fields['criteria.common']  = 1;
+  if (!firstResult.hasSeq)    fields['criteria.seq']     = 1;
+  await statsUpdate({ fields, distIndex: di });
 
   document.getElementById('step-input').style.display = 'none';
   document.getElementById('step-result').style.display = 'block';
@@ -164,7 +159,7 @@ async function doSave() {
   const delta = r.score - firstResult.score;
   const lv = levelInfo(r.score);
 
-  await statsIncrement({ improvements: 1, totalDelta: delta });
+  await statsUpdate({ improveDelta: delta });
 
   const roundNum = sessionHistory.length + 1;
   const passedCount = CHECKS.filter(c => c.pass(r)).length;

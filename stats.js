@@ -10,12 +10,7 @@
  * 3. 프로젝트 설정 > 웹 앱 추가 > SDK 설정 복사
  * 4. firebase-config.js 파일을 아래 내용으로 작성:
  *
- *    const firebaseConfig = {
- *      apiKey: "...",
- *      authDomain: "...",
- *      projectId: "...",
- *      ...
- *    };
+ *    const firebaseConfig = { apiKey: "...", ... };
  *    firebase.initializeApp(firebaseConfig);
  *
  * 5. index.html의 Firebase 스크립트 주석 해제
@@ -23,9 +18,8 @@
  */
 
 const STATS_KEY = 'pw-checker-stats';
-const FIRESTORE_DOC = 'stats/global'; // Firestore 문서 경로
+const FIRESTORE_DOC = 'stats/global';
 
-// Firestore 사용 가능 여부
 function hasFirestore() {
   return typeof firebase !== 'undefined' && firebase.firestore;
 }
@@ -48,24 +42,45 @@ async function statsLoad() {
   if (hasFirestore()) {
     try {
       const doc = await firebase.firestore().doc(FIRESTORE_DOC).get();
-      return doc.exists ? { ...emptyStats(), ...doc.data() } : emptyStats();
+      if (doc.exists) {
+        const data = doc.data();
+        // criteria가 없거나 불완전할 경우 기본값으로 보완
+        const empty = emptyStats();
+        return {
+          ...empty,
+          ...data,
+          criteria: { ...empty.criteria, ...(data.criteria || {}) },
+          dist: data.dist && data.dist.length === 5 ? data.dist : empty.dist,
+        };
+      }
+      return emptyStats();
     } catch (e) {
       console.warn('Firestore 읽기 실패, localStorage 사용:', e);
     }
   }
   try {
     const raw = localStorage.getItem(STATS_KEY);
-    return raw ? { ...emptyStats(), ...JSON.parse(raw) } : emptyStats();
+    if (!raw) return emptyStats();
+    const data = JSON.parse(raw);
+    const empty = emptyStats();
+    return {
+      ...empty,
+      ...data,
+      criteria: { ...empty.criteria, ...(data.criteria || {}) },
+      dist: data.dist && data.dist.length === 5 ? data.dist : empty.dist,
+    };
   } catch (e) {
     return emptyStats();
   }
 }
 
-// ── 쓰기 ─────────────────────────────────────────────────────────
+// ── 쓰기 (전체 문서를 한 번에 저장 — race condition 방지) ─────────
 async function statsSave(s) {
   s.lastUpdated = new Date().toISOString();
   if (hasFirestore()) {
     try {
+      // set(doc, {merge:false}) 로 전체를 한 번에 덮어써서
+      // 동시 write로 인한 필드 유실 방지
       await firebase.firestore().doc(FIRESTORE_DOC).set(s);
       return;
     } catch (e) {
@@ -77,23 +92,15 @@ async function statsSave(s) {
   } catch (e) {}
 }
 
-// ── 원자적 업데이트 (Firestore increment 활용) ───────────────────
-async function statsIncrement(fields) {
-  if (hasFirestore()) {
-    try {
-      const inc = firebase.firestore.FieldValue.increment;
-      const ref = firebase.firestore().doc(FIRESTORE_DOC);
-      const update = {};
-      for (const [k, v] of Object.entries(fields)) update[k] = inc(v);
-      update.lastUpdated = new Date().toISOString();
-      await ref.set(update, { merge: true });
-      return;
-    } catch (e) {
-      console.warn('Firestore increment 실패:', e);
-    }
-  }
-  // localStorage 폴백
+// ── 통계 업데이트 (읽기 → 수정 → 쓰기를 한 번에) ─────────────────
+// 호출 인터페이스:
+//   fields        : { totalChecks:1, criteriaCnt:1, 'criteria.len8':1, ... }
+//   distIndex     : 0~4 (점수 분포 인덱스, 없으면 null)
+//   improveDelta  : 숫자 (개선 저장 시, 없으면 null)
+async function statsUpdate({ fields = {}, distIndex = null, improveDelta = null } = {}) {
   const s = await statsLoad();
+
+  // 일반 필드 증가
   for (const [k, v] of Object.entries(fields)) {
     const parts = k.split('.');
     if (parts.length === 2) {
@@ -103,26 +110,19 @@ async function statsIncrement(fields) {
       s[k] = (s[k] || 0) + v;
     }
   }
-  await statsSave(s);
-}
 
-// ── 배열 업데이트 (dist는 Firestore에서 별도 처리) ───────────────
-async function statsIncrementDist(index) {
-  if (hasFirestore()) {
-    try {
-      const ref = firebase.firestore().doc(FIRESTORE_DOC);
-      const doc = await ref.get();
-      const dist = doc.exists && doc.data().dist ? [...doc.data().dist] : [0,0,0,0,0];
-      dist[index] = (dist[index] || 0) + 1;
-      await ref.set({ dist, lastUpdated: new Date().toISOString() }, { merge: true });
-      return;
-    } catch (e) {
-      console.warn('Firestore dist 실패:', e);
-    }
+  // 점수 분포
+  if (distIndex !== null) {
+    if (!s.dist || s.dist.length !== 5) s.dist = [0,0,0,0,0];
+    s.dist[distIndex] = (s.dist[distIndex] || 0) + 1;
   }
-  const s = await statsLoad();
-  if (!s.dist) s.dist = [0,0,0,0,0];
-  s.dist[index]++;
+
+  // 개선 저장
+  if (improveDelta !== null) {
+    s.improvements = (s.improvements || 0) + 1;
+    s.totalDelta   = (s.totalDelta   || 0) + improveDelta;
+  }
+
   await statsSave(s);
 }
 
@@ -130,16 +130,14 @@ async function statsIncrementDist(index) {
 async function statsReset() {
   const empty = emptyStats();
   if (hasFirestore()) {
-    try {
-      await firebase.firestore().doc(FIRESTORE_DOC).set(empty);
-    } catch (e) {}
+    try { await firebase.firestore().doc(FIRESTORE_DOC).set(empty); } catch (e) {}
   }
   try { localStorage.removeItem(STATS_KEY); } catch (e) {}
 }
 
 // ── DB 상태 표시 ─────────────────────────────────────────────────
 function updateDbBadge() {
-  const dot = document.getElementById('dbDot');
+  const dot   = document.getElementById('dbDot');
   const label = document.getElementById('dbLabel');
   if (!dot || !label) return;
   if (hasFirestore()) {
