@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>비밀번호 안전성 검사기</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.19.0/dist/tabler-icons.min.css" />
+
+<!-- ✅ Firebase 연동: 아래 두 줄 주석 해제 후 firebase-config.js에 본인 설정 입력 -->
+!-- <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script> --
+!-- <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script> --
+!-- <script src="firebase-config.js"></script> --
+
+<style>
+:root {
+  --bg: #f9f9f7;
+  --bg2: #f0efea;
+  --border: #e0dfd8;
+  --border2: #ccc;
+  --text: #1a1a18;
+  --text2: #6b6b63;
+  --radius: 10px;
+  --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'SF Mono', 'Fira Mono', monospace;
+  --green: #1D9E75; --green-bg: #EAF3DE; --green-border: #3B6D11; --green-text: #3B6D11;
+  --red: #E24B4A; --red-bg: #FCEBEB; --red-border: #A32D2D; --red-text: #A32D2D;
+  --yellow: #EF9F27; --yellow-bg: #FAEEDA; --yellow-border: #BA7517; --yellow-text: #633806;
+  --blue: #378ADD;
+  --purple: #534AB7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a18; --bg2: #242420; --border: #38382e; --border2: #4a4a40;
+    --text: #f0efea; --text2: #8a8a80;
+    --green-bg: #085041; --green-border: #5DCAA5; --green-text: #9FE1CB;
+    --red-bg: #501313; --red-border: #F09595; --red-text: #F7C1C1;
+    --yellow-bg: #633806; --yellow-border: #EF9F27; --yellow-text: #FAC775;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; }
+
+/* ── 모바일 중심 레이아웃 ── */
+.app { max-width: 420px; margin: 0 auto; padding: 16px 16px 40px; }
+
+.tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab { flex: 1; padding: 10px 0; font-size: 14px; font-weight: 500; text-align: center; cursor: pointer; border: none; background: none; color: var(--text2); border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.active { color: var(--text); border-bottom-color: var(--text); }
+
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* 입력 */
+.notice { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); padding: 8px 12px; border-radius: var(--radius); background: var(--bg2); margin-bottom: 14px; }
+.dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.label-sm { font-size: 12px; color: var(--text2); margin-bottom: 6px; }
+.pw-input { width: 100%; padding: 11px 14px; border: 1px solid var(--border2); border-radius: var(--radius); font-size: 15px; font-family: var(--mono); background: var(--bg); color: var(--text); outline: none; -webkit-appearance: none; }
+.pw-input:focus { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(55,138,221,0.15); }
+.btn { width: 100%; padding: 12px; margin-top: 10px; border-radius: var(--radius); border: none; font-size: 15px; font-weight: 600; cursor: pointer; }
+.btn-primary { background: var(--text); color: var(--bg); }
+.btn-primary:disabled { opacity: 0.3; cursor: not-allowed; }
+.btn-ghost { background: var(--bg2); color: var(--text2); border: 1px solid var(--border); font-weight: 400; font-size: 13px; }
+
+/* 결과 */
+.meter-wrap { margin: 14px 0 4px; }
+.meter-bar { height: 7px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
+.meter-fill { height: 100%; border-radius: 99px; transition: width .4s, background .4s; }
+.score-row { display: flex; justify-content: space-between; align-items: center; margin: 6px 0 14px; font-size: 13px; color: var(--text2); }
+.score-badge { font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 99px; border: 1px solid transparent; }
+
+.section-label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .06em; margin: 16px 0 8px; }
+
+.checks { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.check-item { display: flex; align-items: flex-start; gap: 7px; padding: 9px 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); font-size: 12px; color: var(--text2); }
+.check-item.pass { border-color: var(--green-border); background: var(--green-bg); color: var(--green-text); }
+.check-item.fail { border-color: var(--red-border); background: var(--red-bg); color: var(--red-text); }
+.check-item.warn { border-color: var(--yellow-border); background: var(--yellow-bg); color: var(--yellow-text); }
+.check-icon { font-size: 14px; margin-top: 1px; flex-shrink: 0; }
+.check-sub { font-size: 10px; opacity: .75; margin-top: 2px; }
+
+/* 완벽 메시지 */
+.perfect-box { margin-top: 14px; padding: 16px; border-radius: var(--radius); background: var(--green-bg); border: 1px solid var(--green-border); text-align: center; }
+.perfect-icon { font-size: 32px; color: var(--green); margin-bottom: 6px; }
+.perfect-title { font-size: 15px; font-weight: 600; color: var(--green-text); margin-bottom: 4px; }
+.perfect-sub { font-size: 13px; color: var(--green-text); opacity: .8; }
+
+/* 개선 방안 */
+.improve-box { margin-top: 12px; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); }
+.improve-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+.improve-item { display: flex; gap: 7px; font-size: 13px; color: var(--text2); padding: 3px 0; line-height: 1.5; }
+.improve-item i { color: var(--red); margin-top: 3px; flex-shrink: 0; }
+
+/* 수정 입력 */
+.revision-area { margin-top: 14px; padding: 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg); }
+.rev-score { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); min-height: 22px; margin-top: 8px; flex-wrap: wrap; }
+
+/* 히스토리 */
+.history { display: flex; flex-direction: column; gap: 8px; }
+.h-item { border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg); padding: 11px 13px; }
+.h-top { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.h-round { font-size: 11px; font-weight: 600; color: var(--text2); background: var(--bg2); padding: 2px 7px; border-radius: 99px; flex-shrink: 0; }
+.h-bar { flex: 1; height: 4px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
+.h-bar-fill { height: 100%; border-radius: 99px; }
+.h-score { font-size: 13px; font-weight: 600; min-width: 30px; text-align: right; }
+.h-delta { font-size: 12px; min-width: 40px; text-align: right; }
+.h-bottom { font-size: 11px; color: var(--text2); display: flex; gap: 10px; flex-wrap: wrap; }
+
+.empty-state { text-align: center; padding: 24px 0; color: var(--text2); font-size: 13px; }
+.toast { font-size: 13px; padding: 9px 13px; border-radius: var(--radius); background: var(--green-bg); border: 1px solid var(--green-border); color: var(--green-text); margin-top: 8px; }
+
+/* 통계 */
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.stat-card { background: var(--bg2); border-radius: var(--radius); padding: 12px 13px; border: 1px solid var(--border); }
+.s-label { font-size: 11px; color: var(--text2); margin-bottom: 3px; }
+.s-val { font-size: 24px; font-weight: 600; color: var(--text); }
+.s-sub { font-size: 10px; color: var(--text2); margin-top: 2px; }
+
+.dist-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.dist-label { font-size: 11px; color: var(--text2); width: 100px; flex-shrink: 0; }
+.dist-track { flex: 1; height: 14px; border-radius: var(--radius); background: var(--bg2); overflow: hidden; }
+.dist-fill { height: 100%; transition: width .5s; }
+.dist-cnt { font-size: 11px; color: var(--text2); min-width: 24px; text-align: right; }
+
+.bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.bar-label { font-size: 12px; color: var(--text2); width: 110px; flex-shrink: 0; line-height: 1.3; }
+.bar-track { flex: 1; height: 8px; border-radius: 99px; background: var(--bg2); overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 99px; transition: width .5s; }
+.bar-pct { font-size: 12px; color: var(--text2); min-width: 34px; text-align: right; }
+
+.reset-btn { font-size: 12px; padding: 5px 11px; border-radius: var(--radius); border: 1px solid var(--border); background: none; color: var(--text2); cursor: pointer; }
+.stats-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+.stats-title { font-size: 16px; font-weight: 600; color: var(--text); }
+.stats-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+
+.db-badge { font-size: 11px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--border); color: var(--text2); background: var(--bg2); margin-bottom: 14px; display: inline-flex; align-items: center; gap: 5px; }
+.db-dot { width: 6px; height: 6px; border-radius: 50%; }
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="tabs">
+    <button class="tab active" onclick="switchTab('checker')"><i class="ti ti-lock"></i> 검사기</button>
+    <button class="tab" onclick="switchTab('stats')"><i class="ti ti-chart-bar"></i> 통계</button>
+  </div>
+
+  <!-- ── 검사기 ── -->
+  <div id="panel-checker" class="panel active">
+    <div class="notice">
+      <span class="dot"></span>
+      비밀번호는 서버로 전송되지 않습니다. 익명 통계만 저장됩니다.
+    </div>
+
+    <div id="step-input">
+      <p class="label-sm">비밀번호 입력</p>
+      <input class="pw-input" id="pwFirst" type="text" placeholder="비밀번호를 입력하세요" autocomplete="off" spellcheck="false" />
+      <button class="btn btn-primary" id="btnAnalyze" onclick="doAnalyze()" disabled>분석하기</button>
+    </div>
+
+    <div id="step-result" style="display:none">
+      <div class="meter-wrap">
+        <div class="meter-bar"><div class="meter-fill" id="meterFill" style="width:0%"></div></div>
+      </div>
+      <div class="score-row">
+        <span id="scoreLabel"></span>
+        <span class="score-badge" id="scoreBadge"></span>
+      </div>
+
+      <div class="section-label">항목별 결과</div>
+      <div class="checks" id="checkGrid"></div>
+
+      <!-- 모든 기준 충족 시 -->
+      <div id="perfectBox" style="display:none" class="perfect-box">
+        <div class="perfect-icon"><i class="ti ti-shield-check"></i></div>
+        <div class="perfect-title">모든 기준을 충족했습니다!</div>
+        <div class="perfect-sub">이 비밀번호는 안전하게 사용할 수 있습니다.</div>
+      </div>
+
+      <!-- 미충족 항목이 있을 때 -->
+      <div id="improveBox" style="display:none" class="improve-box">
+        <div class="improve-title"><i class="ti ti-bulb"></i> 개선 방안</div>
+        <div id="improveList"></div>
+      </div>
+
+      <div id="revisionArea" style="display:none" class="revision-area">
+        <p class="label-sm">수정된 비밀번호를 입력하고 저장하세요</p>
+        <input class="pw-input" id="pwRevised" type="text" placeholder="수정된 비밀번호" autocomplete="off" spellcheck="false" />
+        <div class="rev-score" id="revisionScoreRow"></div>
+        <button class="btn btn-primary" id="btnSave" onclick="doSave()" disabled>개선 결과 저장</button>
+      </div>
+
+      <button class="btn btn-ghost" onclick="doReset()" style="margin-top:10px">
+        <i class="ti ti-refresh"></i> 처음부터 다시
+      </button>
+    </div>
+
+    <div class="section-label" style="margin-top:20px">수정 히스토리 (이번 세션)</div>
+    <div id="historyList"><div class="empty-state">아직 저장된 기록이 없습니다</div></div>
+  </div>
+
+  <!-- ── 통계 ── -->
+  <div id="panel-stats" class="panel">
+    <div class="stats-header">
+      <div>
+        <div class="stats-title">사용 통계</div>
+        <div class="stats-sub" id="lastUpdate">로딩 중...</div>
+      </div>
+      <button class="reset-btn" onclick="resetStats()"><i class="ti ti-refresh"></i> 초기화</button>
+    </div>
+
+    <div class="db-badge" id="dbBadge">
+      <span class="db-dot" id="dbDot" style="background:#ccc"></span>
+      <span id="dbLabel">연결 확인 중...</span>
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="s-label">총 세션 수</div><div class="s-val" id="s-sessions">—</div><div class="s-sub">고유 방문</div></div>
+      <div class="stat-card"><div class="s-label">총 분석 횟수</div><div class="s-val" id="s-checks">—</div><div class="s-sub">분석하기 클릭</div></div>
+      <div class="stat-card"><div class="s-label">개선 저장 횟수</div><div class="s-val" id="s-improvements">—</div><div class="s-sub">개선 결과 저장</div></div>
+      <div class="stat-card"><div class="s-label">평균 향상폭</div><div class="s-val" id="s-avgDelta">—</div><div class="s-sub">저장 시 점수 변화</div></div>
+    </div>
+
+    <div class="section-label">점수 분포</div>
+    <div id="distChart"><div class="empty-state">데이터 없음</div></div>
+
+    <div class="section-label">항목별 충족 비율</div>
+    <div id="criteriaChart"><div class="empty-state">데이터 없음</div></div>
+  </div>
+
+</div><!-- /app -->
+
+<script src="stats.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
