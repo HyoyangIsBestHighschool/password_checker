@@ -1,23 +1,10 @@
 /**
  * stats.js — 통계 저장소
  *
- * Firebase가 연결되어 있으면 Firestore를 사용하고,
- * 없으면 localStorage에 저장합니다.
- *
- * ── Firebase 연동 방법 ──────────────────────────────────────────
- * 1. https://console.firebase.google.com 에서 프로젝트 생성
- * 2. Firestore Database 활성화 (테스트 모드로 시작)
- * 3. 프로젝트 설정 > 웹 앱 추가 > SDK 설정 복사
- * 4. firebase-config.js 파일을 아래 내용으로 작성:
- *
- *    const firebaseConfig = { apiKey: "...", ... };
- *    firebase.initializeApp(firebaseConfig);
- *
- * 5. index.html의 Firebase 스크립트 주석 해제
- * ────────────────────────────────────────────────────────────────
+ * Firebase Firestore 연결 시 Firestore, 없으면 localStorage 사용.
  */
 
-const STATS_KEY = 'pw-checker-stats';
+const STATS_KEY    = 'pw-checker-stats';
 const FIRESTORE_DOC = 'stats/global';
 
 function hasFirestore() {
@@ -37,50 +24,56 @@ function emptyStats() {
   };
 }
 
+/**
+ * Firestore/localStorage 양쪽 모두에서 발생할 수 있는
+ * "criteria.len8" 식의 flat key 잔재를 criteria 객체로 복원.
+ * 이전 버전 코드가 dot-notation 키를 최상위에 저장했을 경우 대응.
+ */
+function normalizeData(data) {
+  const empty = emptyStats();
+  const result = {
+    ...empty,
+    ...data,
+    criteria: { ...empty.criteria, ...(data.criteria || {}) },
+    dist: (data.dist && data.dist.length === 5) ? [...data.dist] : [...empty.dist],
+  };
+
+  // flat key 잔재 흡수: "criteria.len8" → result.criteria.len8
+  const CRIT_KEYS = ['len8','len15','upper','lower','digit','special','common','seq'];
+  for (const k of CRIT_KEYS) {
+    const flat = `criteria.${k}`;
+    if (data[flat] !== undefined) {
+      result.criteria[k] = (result.criteria[k] || 0) + Number(data[flat]);
+      delete result[flat]; // 저장 시 재오염 방지
+    }
+  }
+  return result;
+}
+
 // ── 읽기 ─────────────────────────────────────────────────────────
 async function statsLoad() {
   if (hasFirestore()) {
     try {
-      const doc = await firebase.firestore().doc(FIRESTORE_DOC).get();
-      if (doc.exists) {
-        const data = doc.data();
-        // criteria가 없거나 불완전할 경우 기본값으로 보완
-        const empty = emptyStats();
-        return {
-          ...empty,
-          ...data,
-          criteria: { ...empty.criteria, ...(data.criteria || {}) },
-          dist: data.dist && data.dist.length === 5 ? data.dist : empty.dist,
-        };
-      }
-      return emptyStats();
+      const snap = await firebase.firestore().doc(FIRESTORE_DOC).get();
+      return normalizeData(snap.exists ? snap.data() : {});
     } catch (e) {
-      console.warn('Firestore 읽기 실패, localStorage 사용:', e);
+      console.warn('Firestore 읽기 실패, localStorage 폴백:', e);
+      // 의도적으로 localStorage로 fall-through
     }
   }
   try {
     const raw = localStorage.getItem(STATS_KEY);
-    if (!raw) return emptyStats();
-    const data = JSON.parse(raw);
-    const empty = emptyStats();
-    return {
-      ...empty,
-      ...data,
-      criteria: { ...empty.criteria, ...(data.criteria || {}) },
-      dist: data.dist && data.dist.length === 5 ? data.dist : empty.dist,
-    };
+    return normalizeData(raw ? JSON.parse(raw) : {});
   } catch (e) {
     return emptyStats();
   }
 }
 
-// ── 쓰기 (전체 문서를 한 번에 저장 — race condition 방지) ─────────
+// ── 쓰기 ─────────────────────────────────────────────────────────
 async function statsSave(s) {
   s.lastUpdated = new Date().toISOString();
   if (hasFirestore()) {
     try {
-      // set(doc, {merge:false}) 로 전체를 한 번에 덮어써서
-      // 동시 write로 인한 필드 유실 방지
       await firebase.firestore().doc(FIRESTORE_DOC).set(s);
       return;
     } catch (e) {
@@ -92,32 +85,28 @@ async function statsSave(s) {
   } catch (e) {}
 }
 
-// ── 통계 업데이트 (읽기 → 수정 → 쓰기를 한 번에) ─────────────────
-// 호출 인터페이스:
-//   fields        : { totalChecks:1, criteriaCnt:1, 'criteria.len8':1, ... }
-//   distIndex     : 0~4 (점수 분포 인덱스, 없으면 null)
-//   improveDelta  : 숫자 (개선 저장 시, 없으면 null)
+// ── 통합 업데이트 (읽기 → 수정 → 쓰기 한 번에) ───────────────────
+// fields       : { totalChecks:1, criteriaCnt:1, 'criteria.len8':1, ... }
+// distIndex    : 0~4 | null
+// improveDelta : number | null
 async function statsUpdate({ fields = {}, distIndex = null, improveDelta = null } = {}) {
   const s = await statsLoad();
 
-  // 일반 필드 증가
   for (const [k, v] of Object.entries(fields)) {
     const parts = k.split('.');
     if (parts.length === 2) {
-      if (!s[parts[0]]) s[parts[0]] = {};
+      if (!s[parts[0]] || typeof s[parts[0]] !== 'object') s[parts[0]] = {};
       s[parts[0]][parts[1]] = (s[parts[0]][parts[1]] || 0) + v;
     } else {
       s[k] = (s[k] || 0) + v;
     }
   }
 
-  // 점수 분포
   if (distIndex !== null) {
-    if (!s.dist || s.dist.length !== 5) s.dist = [0,0,0,0,0];
+    if (!Array.isArray(s.dist) || s.dist.length !== 5) s.dist = [0,0,0,0,0];
     s.dist[distIndex] = (s.dist[distIndex] || 0) + 1;
   }
 
-  // 개선 저장
   if (improveDelta !== null) {
     s.improvements = (s.improvements || 0) + 1;
     s.totalDelta   = (s.totalDelta   || 0) + improveDelta;
